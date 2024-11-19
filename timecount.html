@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Work Timer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        #app {
+            max-width: 600px;
+            margin: auto;
+        }
+        .task-input {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .task-input input, .task-input button {
+            padding: 10px;
+            font-size: 16px;
+        }
+        .timer {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .activities {
+            margin-top: 20px;
+        }
+        .activity-log {
+            white-space: pre-wrap;
+            background-color: #fff;
+            padding: 10px;
+            border: 1px solid #ccc;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .excess-time {
+            color: red;
+        }
+        button {
+            cursor: pointer;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>Enhanced Work & Break Timer</h1>
+        <div class="task-input">
+            <input type="text" id="task" placeholder="Enter task description">
+            <input type="text" id="tag" placeholder="Enter task tag">
+            <button onclick="startTask()">Start Task</button>
+        </div>
+        <div class="timer">
+            <div>Task Time: <span id="task-time">00:00</span></div>
+            <div>Break Time: <span id="break-time">00:00</span></div>
+        </div>
+        <button onclick="stopTask()">Stop Task</button>
+        <button id="clear-logs-button" onclick="clearLogs()">Clear Logs</button>
+        <button onclick="exportLogs()">Export Logs</button>
+        <input type="file" id="log-file" accept=".txt">
+        <button onclick="importLogs()">Import Logs</button>
+
+        <div class="activities">
+            <h2>Activity Log</h2>
+            <div id="log" class="activity-log"></div>
+        </div>
+    </div>
+
+    <script>
+        let taskTimer, breakTimer, taskStartTime, breakStartTime, expectedBreakEndTime;
+        let isTaskRunning = false, isBreakRunning = false;
+        const logElement = document.getElementById('log');
+        const desktopFilePath = 'C:\\Users\\Lenovo\\Desktop\\log.txt';
+        const androidFilePath = '/storage/emulated/0/Download/log.txt';
+
+        function formatDateTime(date) {
+            const options = { hour: '2-digit', minute: '2-digit', hour12: true };
+            return date.toLocaleTimeString('en-US', options);
+        }
+
+        function formatDate(date) {
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}-${month}-${year}`;
+        }
+
+        function formatDuration(seconds) {
+            const hour = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return `${String(hour).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+
+        function displayLogs() {
+            const logs = JSON.parse(localStorage.getItem('logs')) || [];
+            logElement.innerHTML = logs.join('<br>');
+        }
+
+        function saveLogToStorage(log) {
+            const logs = JSON.parse(localStorage.getItem('logs')) || [];
+            logs.push(log);
+            localStorage.setItem('logs', JSON.stringify(logs));
+        }
+
+        function startTask() {
+            if (isTaskRunning) return;
+
+            const taskDescription = document.getElementById('task').value;
+            const taskTag = document.getElementById('tag').value;
+
+            if (!taskDescription || !taskTag) {
+                alert('Please fill in both fields!');
+                return;
+            }
+
+            if (isBreakRunning) {
+                const actualEndTime = new Date();
+                const excessMinutes = Math.max(0, Math.ceil((actualEndTime - expectedBreakEndTime) / 60000));
+                const excessInfo = excessMinutes > 0
+                    ? `Excess: <span class="excess-time">${formatDuration(excessMinutes * 60)}</span>`
+                    : '';
+
+                saveLogToStorage(
+                    `[Break ended]: Expected End: ${formatDateTime(expectedBreakEndTime)}, Actual End: ${formatDateTime(actualEndTime)}, ${excessInfo}`
+                );
+                clearInterval(breakTimer);
+                isBreakRunning = false;
+                document.getElementById('break-time').innerText = "00:00";
+            }
+
+            saveLogToStorage(`[Task started]: Task: ${taskDescription}, Tag: ${taskTag}, Start Time: ${formatDateTime(new Date())}`);
+            taskStartTime = Date.now();
+            isTaskRunning = true;
+            clearInterval(breakTimer);
+            taskTimer = setInterval(updateTimers, 1000);
+            displayLogs();
+        }
+
+        function stopTask() {
+            if (!isTaskRunning) return;
+
+            const taskEndTime = new Date();
+            const taskTimeSeconds = Math.floor((Date.now() - taskStartTime) / 1000);
+            const breakTimeSeconds = Math.floor(taskTimeSeconds * 0.20);
+            expectedBreakEndTime = new Date(Date.now() + breakTimeSeconds * 1000);
+
+            saveLogToStorage(
+                `[Task stopped]: Task: ${document.getElementById('task').value}, Tag: ${document.getElementById('tag').value}, Date: ${formatDate(taskEndTime)}, Start Time: ${formatDateTime(new Date(taskStartTime))}, End Time: ${formatDateTime(taskEndTime)}, Duration: ${formatDuration(taskTimeSeconds)}`
+            );
+
+            saveLogToStorage(
+                `[Break started]: Start Time: ${formatDateTime(taskEndTime)}, For: ${formatDuration(breakTimeSeconds)}, Expected End: ${formatDateTime(expectedBreakEndTime)}`
+            );
+
+            taskStartTime = null;
+            isTaskRunning = false;
+            isBreakRunning = true;
+
+            clearInterval(taskTimer);
+            document.getElementById('task-time').innerText = "00:00";
+            breakStartTime = Date.now();
+
+            breakTimer = setInterval(() => {
+                const elapsedTime = Math.floor((Date.now() - breakStartTime) / 1000);
+                document.getElementById('break-time').innerText = formatDuration(elapsedTime);
+
+                if (elapsedTime >= breakTimeSeconds) {
+                    clearInterval(breakTimer);
+                    alert('Break time is over! Start a new task.');
+                    displayLogs();
+                }
+            }, 1000);
+
+            displayLogs();
+        }
+
+        function clearLogs() {
+            localStorage.removeItem('logs');
+            logElement.innerHTML = '';
+            alert('Logs have been cleared!');
+        }
+
+        function importLogs() {
+            const fileInput = document.getElementById('log-file');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file to import.');
+                return;
+            }
+            
+            const reader = new FileReader();
+            
+            reader.onload = function (event) {
+                const logs = event.target.result;
+                localStorage.setItem('logs', logs);
+                displayLogs();
+                alert('Logs have been successfully imported!');
+            };
+            
+            reader.onerror = function () {
+                alert('Error reading the file. Please try again.');
+            };
+            
+            reader.readAsText(file);
+        }
+
+
+        function exportLogs() {
+            const logs = localStorage.getItem('logs') || 'No logs available.';
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'task_logs.txt';
+            link.click();
+        }
+
+        function updateTimers() {
+            if (isTaskRunning) {
+                const taskTime = Math.floor((Date.now() - taskStartTime) / 1000);
+                document.getElementById('task-time').innerText = formatDuration(taskTime);
+            }
+        }
+
+        displayLogs();
+    </script>
+</body>
+</html>
